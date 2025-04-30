@@ -9,7 +9,7 @@
 #test
 #install.packages(c("shinylive", "httpuv"))
 library(pacman)
-p_load(shiny, tidyverse, terra, tidyterra, ggnewscale, shinylive, httpuv, tmap, sf, lwgeom, reactlog, stars, DT)
+p_load(shiny, tidyverse, terra, tidyterra, ggnewscale, shinylive, httpuv, tmap, sf, reactlog, stars, DT) #lwgeom, 
 reactlog::reactlog_enable()
 
 #read in data
@@ -20,10 +20,6 @@ the_map <- tm_shape(looking_good) +
          col.scale = tm_scale_rgb(stretch = FALSE, max_color_value = 1)
   )+
   tm_basemap(server = "Esri.WorldGrayCanvas", group = NA, alpha = NA)
-
-#stuff from chatgpt
-
-tmap_mode("view")
 
 points1 <- st_read("./w3_stic_locs_snap.shp") %>% 
   select(pk) %>% 
@@ -284,5 +280,5 @@ server <- function(input, output, session) {
 
 shinyApp(ui, server)
 
-shinylive::export(appdir = "seismicMap", destdir = "docs")
-
+#shinylive::export(appdir = "seismicMap", destdir = "docs")
+#runStaticServer("docs")
