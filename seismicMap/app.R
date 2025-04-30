@@ -9,7 +9,7 @@
 #test
 #install.packages(c("shinylive", "httpuv"))
 library(pacman)
-p_load(shiny, tidyverse, terra, tidyterra, ggnewscale, shinylive, httpuv, tmap, sf, reactlog, stars, DT) #lwgeom, 
+p_load(shiny, tidyverse, terra, shinylive, httpuv, tmap, sf, stars, DT) #lwgeom, 
 reactlog::reactlog_enable()
 
 #read in data
