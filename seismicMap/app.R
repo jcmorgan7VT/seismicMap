@@ -14,11 +14,16 @@ reactlog::reactlog_enable()
 
 #read in data
 looking_good <- rast("pansharpened_terra.tif")
+network <- vect("./network.shp")
+
 
 the_map <- tm_shape(looking_good) + 
   tm_rgb(col = tm_vars(c(1,2,3), multivariate = TRUE),
          col.scale = tm_scale_rgb(stretch = FALSE, max_color_value = 1)
   )+
+  tm_shape(network)+
+  tm_lines(col = "midnightblue",
+           lwd = "StrType")+
   tm_basemap(server = "Esri.WorldGrayCanvas", group = NA, alpha = NA)
 
 points1 <- st_read("./w3_stic_locs_snap.shp") %>% 
@@ -30,8 +35,10 @@ points2 <- st_read("./depths.shp") %>%
   rename("value" = depth) %>% 
   mutate("dataset" = "depth")
 
+
 #read in elevation raster
 elevation <- (rast("./dem.tif"))
+
 
 tmap_mode("view")
 
@@ -84,19 +91,6 @@ server <- function(input, output, session) {
     centerline_geom(NULL)  # Clear any existing centerline
     analysis_data(NULL)    # Reset analysis data
     
-    # Optionally, also reset the map by refreshing it
-    output$map <- renderTmap({
-      tm <- the_map
-      tm <- tm+tm_shape(st_transform(points1, 4326)) + tm_dots(fill = "value", size = 0.6, shape = 24,
-                                                               tm_scale_continuous(values = "brewer.blues"),
-                                                               fill.legend = tm_legend(title = "Proportion of Time Flowing"),
-                                                               group = "Sensor locations")
-      tm <- tm + tm_shape(st_transform(points2, 4326)) + tm_dots(fill = "value", size = 0.5, shape = 21,
-                                                                 fill.scale = tm_scale_continuous(values = "brewer.greys"),
-                                                                 fill.legend = tm_legend(title = "Depth (m)"),
-                                                                 group = "Seismic Depths")  # Just render the base map again
-      tm
-    })
   })
   
   get_rotated_rectangle <- reactive({
@@ -147,6 +141,7 @@ server <- function(input, output, session) {
                                                                fill.scale = tm_scale_continuous(values = "brewer.greys"),
                                                                fill.legend = tm_legend(title = "Depth (m)"),
                                                                group = "Seismic Depths")
+    
     if (!is.null(rect)) {
       tm <- tm + tm_shape(st_transform(rect, 4326)) + tm_borders(col = "red", lwd = 2)
     } 
@@ -269,11 +264,8 @@ server <- function(input, output, session) {
       
     data2 <- clip_and_project(points2, "depth")
     
-    if (!is.null(data1) && !is.null(data2)) {
-      analysis_data(bind_rows(data1, data2, centerline_profile))
-    } else {
-      analysis_data(NULL)
-    }
+    analysis_data(bind_rows(data1, data2, centerline_profile))
+    
   })
   
   output$profile_plot <- renderPlot({
