@@ -7,7 +7,7 @@
 #    https://shiny.posit.co/
 #
 #test
-#install.packages(c("shinylive", "httpuv"))
+#install.packages(c("shinylive", "httpuv")) 
 library(pacman)
 p_load(shiny, tidyverse, terra, shinylive, httpuv, tmap, sf, stars, DT) #lwgeom, 
 reactlog::reactlog_enable()
