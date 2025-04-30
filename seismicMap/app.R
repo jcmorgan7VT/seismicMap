@@ -9,7 +9,7 @@
 #test
 #install.packages(c("shinylive", "httpuv"))
 library(pacman)
-p_load(shiny, tidyverse, terra, tidyterra, ggnewscale, shinylive, httpuv, tmap, sf, lwgeom, reactlog, stars)
+p_load(shiny, tidyverse, terra, tidyterra, ggnewscale, shinylive, httpuv, tmap, sf, lwgeom, reactlog, stars, DT)
 reactlog::reactlog_enable()
 
 #read in data
@@ -44,7 +44,8 @@ utm_crs <- 26919
 
 
 ui <- fluidPage(
-  h3("Interactive Profile Analysis (EPSG:26919)"),
+  h3("Interactive Depth-to-Bedrock Profile Analysis"),
+  p("Click twice on map to define a rectangle.  Rotate with the rotation angle slider. Click Run Analysis to plot cross-section of surface elevation, depth measurements, and proportion of time flowing of sensor locations below map."),
   actionButton("reset", "Reset Selection"),
   sliderInput("angle", "Rotation Angle (degrees):", min = 0, max = 360, value = 0),
   actionButton("run_analysis", "Run Analysis"),
@@ -105,8 +106,12 @@ server <- function(input, output, session) {
     center <- centerline_geom()
     
     tm <- the_map
-    tm <- tm+tm_shape(st_transform(points1, 4326)) + tm_dots(col = "blue", size = 0.05)
-    tm <- tm + tm_shape(st_transform(points2, 4326)) + tm_dots(col = "green", size = 0.05)
+    tm <- tm+tm_shape(st_transform(points1, 4326)) + tm_dots(fill = "value", size = 0.6, shape = 24,
+                                                             tm_scale_continuous(values = "brewer.blues"),
+                                                             fill.legend = tm_legend(title = "Proportion of Time Flowing"))
+    tm <- tm + tm_shape(st_transform(points2, 4326)) + tm_dots(fill = "value", size = 0.5, shape = 21,
+                                                               fill.scale = tm_scale_continuous(values = "brewer.greys"),
+                                                               fill.legend = tm_legend(title = "Depth (m)"))
     if (!is.null(rect)) {
       tm <- tm + tm_shape(st_transform(rect, 4326)) + tm_borders(col = "red", lwd = 2)
     } 
@@ -158,14 +163,15 @@ server <- function(input, output, session) {
     centerline_geom(centerline)
     
     #centerline <- st_cast(c(p1, p2),"LINESTRING")|> st_sfc(crs = utm_crs)
-    sampled_pts <- st_line_sample(centerline, n = 100) |> st_cast("POINT")
+    sampled_pts <- st_line_sample(centerline, n = 50) |> st_cast("POINT")
     sampled_elev <- terra::extract(elevation, vect(sampled_pts))[, 2]
     
     centerline_profile <- tibble(
       dataset = "Centerline",
       distance_m = seq(0, as.numeric(st_length(centerline)), length.out = length(sampled_pts)),
       elevation = sampled_elev,
-      value = NA
+      value = NA,
+      distance_from_line = 0
     )
     
     
@@ -178,6 +184,8 @@ server <- function(input, output, session) {
       snapped <- st_cast(projected, "POINT")[seq(2, length(projected) * 2, by = 2)]
       snapped <- st_set_crs(snapped, st_crs(centerline))
       
+      distance_from <- st_distance(clipped, centerline)
+      
 
       dists <- sapply(1:length(snapped), function(i) {
         measure_along_line(centerline, snapped[i])
@@ -189,7 +197,8 @@ server <- function(input, output, session) {
         dataset = dataset_name,
         distance_m = dists,
         elevation = elevations_ex$dem,
-        value = clipped$value
+        value = clipped$value,
+        distance_from_line = as.numeric(distance_from)
       )
     }
     
@@ -210,17 +219,26 @@ server <- function(input, output, session) {
     
     ggplot(df, aes(x = distance_m)) +
       geom_line(filter(df, dataset == "Centerline"), mapping = aes(x = distance_m, y = elevation))+
-      geom_point(filter(df, dataset == "pk"), mapping = aes(x = distance_m, y = elevation), pch = 24)+
-      geom_point(filter(df, dataset == "depth"), mapping = aes(x = distance_m, y = elevation - value, fill = value), pch = 21) +
+      geom_line(filter(df, dataset == "depth"), mapping = aes(x = distance_m, y = elevation - value), lty = 2)+
+      geom_point(filter(df, dataset == "pk"), mapping = aes(x = distance_m, y = elevation), pch = 24, size = 3)+
+      geom_point(filter(df, dataset == "depth"), mapping = aes(x = distance_m, y = elevation - value, fill = value), pch = 21, size = 3) +
       #geom_smooth(se = FALSE) +
-      labs(x = "Distance along centerline (m)", y = "Value") +
-      theme_minimal()
+      labs(x = "Distance along centerline (m)", y = "Elevation (m)") +
+      theme_classic()
   })
+  
+  
+  # output$data_table <- DT::renderDataTable({
+  #   df <- analysis_data()
+  #   if (is.null(df)) return()
+  #   df <- df |> filter(dataset != "Centerline") %>% arrange(dataset, distance_m)
+  #   DT::datatable(df, selection = "single", options = list(pageLength = 10))
+  # })
   
   output$data_table <- renderTable({
     df <- analysis_data()
     if (is.null(df)) return()
-    df |> arrange(dataset, distance_m)
+    df |> filter(dataset != "Centerline") %>% arrange(dataset, distance_m)
   })
   
 }
