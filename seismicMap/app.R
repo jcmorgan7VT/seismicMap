@@ -43,7 +43,7 @@ ui <- fluidPage(
   h3("Interactive Depth-to-Bedrock Profile Analysis"),
   p("Click twice on map to define a rectangle.  Rotate with the rotation angle slider. Click Run Analysis to plot cross-section of surface elevation, depth measurements, and proportion of time flowing of sensor locations below map."),
   actionButton("reset", "Reset Selection"),
-  sliderInput("angle", "Rotation Angle (degrees):", min = 0, max = 360, value = 0),
+  sliderInput("width", "Rectangle Half-Width (meters):", min = 1, max = 100, value = 10),
   actionButton("run_analysis", "Run Analysis"),
   tmapOutput("map", height = "600px"),
   plotOutput("profile_plot", height = "300px"),
@@ -54,55 +54,85 @@ ui <- fluidPage(
 )
 
 server <- function(input, output, session) {
-  click_coords <- reactiveVal(data.frame(lon = numeric(0), lat = numeric(0)))
+  click_coords <- reactiveVal(data.frame(X = numeric(0), Y = numeric(0)))
+
   
-  observeEvent(input$map_click, {
-    coord <- input$map_click
-    pt <- st_sfc(st_point(c(coord$lng, coord$lat)), crs = 4326) |>
-      st_transform(utm_crs)
-    coords <- rbind(click_coords(), st_coordinates(pt))
-    if (nrow(coords) > 2) coords <- coords[2:3, ]
-    click_coords(coords)
-  })
-  
-  observeEvent(input$reset, {
-    click_coords(data.frame(lon = numeric(0), lat = numeric(0)))
-    analysis_data(NULL)
-  })
+    observeEvent(input$map_click, {
+      coord <- input$map_click
+      if (is.null(coord$lng) || is.null(coord$lat)) return()
+      
+      pt <- st_sfc(st_point(c(coord$lng, coord$lat)), crs = 4326) |>
+        st_transform(utm_crs)
+      
+      coords <- rbind(click_coords(), (st_coordinates(pt)))
+      names(coords) <- c("X", "Y")
+      
+      if (nrow(coords) > 2) coords <- coords[2:3, ]
+      
+      click_coords(coords)
+     # print(str(click_coords())) #used for debugging
+      
+    })
   
   observeEvent(input$reset_points, {
     excluded_rows(integer(0))
   })
   
+  observeEvent(input$reset, {
+    # Clear click_coords and reset analysis_data
+    click_coords(data.frame(X = numeric(0), Y = numeric(0)))
+    centerline_geom(NULL)  # Clear any existing centerline
+    analysis_data(NULL)    # Reset analysis data
+    
+    # Optionally, also reset the map by refreshing it
+    output$map <- renderTmap({
+      tm <- the_map
+      tm <- tm+tm_shape(st_transform(points1, 4326)) + tm_dots(fill = "value", size = 0.6, shape = 24,
+                                                               tm_scale_continuous(values = "brewer.blues"),
+                                                               fill.legend = tm_legend(title = "Proportion of Time Flowing"),
+                                                               group = "Sensor locations")
+      tm <- tm + tm_shape(st_transform(points2, 4326)) + tm_dots(fill = "value", size = 0.5, shape = 21,
+                                                                 fill.scale = tm_scale_continuous(values = "brewer.greys"),
+                                                                 fill.legend = tm_legend(title = "Depth (m)"),
+                                                                 group = "Seismic Depths")  # Just render the base map again
+      tm
+    })
+  })
   
   get_rotated_rectangle <- reactive({
+    
+    
     coords <- click_coords()
     if (nrow(coords) < 2) return(NULL)
     
-    x_range <- range(coords[, 1])
-    y_range <- range(coords[, 2])
+    # Ensure numeric type
+    p1 <- as.numeric(coords[1, ])
+    p2 <- as.numeric(coords[2, ])
     
-    rect_coords <- rbind(
-      c(x_range[1], y_range[1]),
-      c(x_range[1], y_range[2]),
-      c(x_range[2], y_range[2]),
-      c(x_range[2], y_range[1]),
-      c(x_range[1], y_range[1])
-    )
     
-    rect_poly <- st_polygon(list(rect_coords)) |> st_sfc(crs = utm_crs)
-    center <- st_centroid(rect_poly)
+    dx <- p2[1] - p1[1]
+    dy <- p2[2] - p1[2]
+    len <- sqrt(dx^2 + dy^2)
+    ux <- dx / len
+    uy <- dy / len
     
-    angle_rad <- input$angle * pi / 180
-    rot_mat <- matrix(c(cos(angle_rad), sin(angle_rad), -sin(angle_rad), cos(angle_rad)), nrow = 2)
+    # Perpendicular unit vector
+    px <- -uy
+    py <- ux
     
-    coords_mat <- st_coordinates(rect_poly)[, 1:2]
-    coords_centered <- sweep(coords_mat, 2, st_coordinates(center))
-    coords_rotated <- (coords_centered %*% rot_mat) + matrix(st_coordinates(center), nrow(coords_mat), 2, byrow = TRUE)
+    width <- input$width
     
-    rotated_poly <- st_polygon(list(coords_rotated)) |> st_sfc(crs = utm_crs)
-    st_sf(geometry = rotated_poly)
+    corner1 <- c(p1[1] + px * width, p1[2] + py * width)
+    corner2 <- c(p1[1] - px * width, p1[2] - py * width)
+    corner3 <- c(p2[1] - px * width, p2[2] - py * width)
+    corner4 <- c(p2[1] + px * width, p2[2] + py * width)
+    
+    rect_coords <- rbind(corner1, corner2, corner3, corner4, corner1)
+    
+    st_sf(geometry = st_sfc(st_polygon(list(rect_coords)), crs = utm_crs))
   })
+  
+  
   
   output$map <- renderTmap({
     rect <- get_rotated_rectangle()
@@ -123,6 +153,7 @@ server <- function(input, output, session) {
     if (!is.null(center)) {
       tm <- tm + tm_shape(st_transform(center, 4326)) + tm_lines(col = "black", lwd = 2)
     }
+    
     tm
   })
   
@@ -132,19 +163,30 @@ server <- function(input, output, session) {
     start <- st_startpoint(line)
     dist <- st_distance(st_startpoint(line), point)
     as.numeric(dist)
-    # line_pts <- st_line_sample(line, sample = seq(0, 1, length.out = 1000))
-    # dists <- st_distance(line_pts, point)
-    #as.numeric(dists) #commented these out
-    # min_index <- which.min(dists)
-    # total_length <- st_length(line)
-    # rel_pos <- (min_index - 1) / (length(line_pts) - 1)
-    # as.numeric(rel_pos * total_length)
   }
   
   #reactive values
   analysis_data <- reactiveVal(NULL)
   centerline_geom <- reactiveVal(NULL)
   excluded_rows <- reactiveVal(integer(0))
+  
+  
+  observe({
+    coords <- click_coords()
+    if (nrow(coords) < 2) {
+      centerline_geom(NULL)
+      return()
+    }
+    
+    # Define centerline as a LINESTRING from the two clicked points
+    p1 <- as.numeric(coords[1, ])
+    p2 <- as.numeric(coords[2, ])
+    mat <- rbind(p1, p2)  # this will now be a proper numeric matrix
+    centerline <- st_linestring(mat) |> st_sfc(crs = utm_crs)
+    centerline_geom(centerline)
+  })
+  
+  
   
   observeEvent(input$remove_selected, {
     selected <- input$data_table_rows_selected
@@ -242,15 +284,19 @@ server <- function(input, output, session) {
       df <- df[-excluded, ]
     }
     
+    centerline_data <- filter(df, dataset == "Centerline")
+    depth_data <- filter(df, dataset == "depth")
+    pk_data <- filter(df, dataset == "pk")
+    
     ggplot(df, aes(x = distance_m)) +
-      geom_line(filter(df, dataset == "Centerline"), mapping = aes(x = distance_m, y = elevation))+
-      geom_line(filter(df, dataset == "depth"), mapping = aes(x = distance_m, y = elevation - value), lty = 2)+
-      geom_point(filter(df, dataset == "pk"), mapping = aes(x = distance_m, y = elevation, fill = value), pch = 24, size = 3)+
-      geom_point(filter(df, dataset == "depth"), mapping = aes(x = distance_m, y = elevation - value), pch = 21, size = 3) +
-      scale_fill_distiller("brewer.blues", name = "Proportion of Time Flowing", values = c(1, 0))+
-      #geom_smooth(se = FALSE) +
+      { if (nrow(centerline_data) > 0) geom_line(data = centerline_data, aes(y = elevation)) } +
+      { if (nrow(depth_data) > 0) geom_line(data = depth_data, aes(y = elevation - value), lty = 2) } +
+      { if (nrow(pk_data) > 0) geom_point(data = pk_data, aes(y = elevation, fill = value), pch = 24, size = 3) } +
+      { if (nrow(depth_data) > 0) geom_point(data = depth_data, aes(y = elevation - value), pch = 21, size = 3) } +
+      scale_fill_distiller("brewer.blues", name = "Proportion of Time Flowing", values = c(1, 0)) +
       labs(x = "Distance along centerline (m)", y = "Elevation (m)") +
       theme_classic()
+    
   })
   
   
