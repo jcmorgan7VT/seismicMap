@@ -51,7 +51,9 @@ ui <- fluidPage(
   actionButton("run_analysis", "Run Analysis"),
   tmapOutput("map", height = "600px"),
   plotOutput("profile_plot", height = "300px"),
-  tableOutput("data_table")
+  actionButton("remove_selected", "Remove Selected Points"),
+  actionButton("reset_points", "Reset Removed Points"),
+  DT::dataTableOutput("data_table")
   
 )
 
@@ -71,6 +73,11 @@ server <- function(input, output, session) {
     click_coords(data.frame(lon = numeric(0), lat = numeric(0)))
     analysis_data(NULL)
   })
+  
+  observeEvent(input$reset_points, {
+    excluded_rows(integer(0))
+  })
+  
   
   get_rotated_rectangle <- reactive({
     coords <- click_coords()
@@ -108,10 +115,12 @@ server <- function(input, output, session) {
     tm <- the_map
     tm <- tm+tm_shape(st_transform(points1, 4326)) + tm_dots(fill = "value", size = 0.6, shape = 24,
                                                              tm_scale_continuous(values = "brewer.blues"),
-                                                             fill.legend = tm_legend(title = "Proportion of Time Flowing"))
+                                                             fill.legend = tm_legend(title = "Proportion of Time Flowing"),
+                                                             group = "Sensor locations")
     tm <- tm + tm_shape(st_transform(points2, 4326)) + tm_dots(fill = "value", size = 0.5, shape = 21,
                                                                fill.scale = tm_scale_continuous(values = "brewer.greys"),
-                                                               fill.legend = tm_legend(title = "Depth (m)"))
+                                                               fill.legend = tm_legend(title = "Depth (m)"),
+                                                               group = "Seismic Depths")
     if (!is.null(rect)) {
       tm <- tm + tm_shape(st_transform(rect, 4326)) + tm_borders(col = "red", lwd = 2)
     } 
@@ -136,9 +145,25 @@ server <- function(input, output, session) {
     # as.numeric(rel_pos * total_length)
   }
   
+  #reactive values
   analysis_data <- reactiveVal(NULL)
-  
   centerline_geom <- reactiveVal(NULL)
+  excluded_rows <- reactiveVal(integer(0))
+  
+  observeEvent(input$remove_selected, {
+    selected <- input$data_table_rows_selected
+    current <- excluded_rows()
+    
+    if (length(selected) > 0) {
+      new_excluded <- unique(c(current, selected))
+      excluded_rows(new_excluded)
+      
+      # Clear selection
+      DT::selectRows(DT::dataTableProxy("data_table"), NULL)
+    }
+  })
+  
+  
   
   
   observeEvent(input$run_analysis, {
@@ -216,31 +241,48 @@ server <- function(input, output, session) {
   output$profile_plot <- renderPlot({
     df <- analysis_data()
     if (is.null(df)) return()
+    excluded <- excluded_rows()
+    if (length(excluded) > 0) {
+      df <- df[-excluded, ]
+    }
     
     ggplot(df, aes(x = distance_m)) +
       geom_line(filter(df, dataset == "Centerline"), mapping = aes(x = distance_m, y = elevation))+
       geom_line(filter(df, dataset == "depth"), mapping = aes(x = distance_m, y = elevation - value), lty = 2)+
-      geom_point(filter(df, dataset == "pk"), mapping = aes(x = distance_m, y = elevation), pch = 24, size = 3)+
-      geom_point(filter(df, dataset == "depth"), mapping = aes(x = distance_m, y = elevation - value, fill = value), pch = 21, size = 3) +
+      geom_point(filter(df, dataset == "pk"), mapping = aes(x = distance_m, y = elevation, fill = value), pch = 24, size = 3)+
+      geom_point(filter(df, dataset == "depth"), mapping = aes(x = distance_m, y = elevation - value), pch = 21, size = 3) +
+      scale_fill_distiller("brewer.blues", name = "Proportion of Time Flowing", values = c(1, 0))+
       #geom_smooth(se = FALSE) +
       labs(x = "Distance along centerline (m)", y = "Elevation (m)") +
       theme_classic()
   })
   
   
-  # output$data_table <- DT::renderDataTable({
-  #   df <- analysis_data()
-  #   if (is.null(df)) return()
-  #   df <- df |> filter(dataset != "Centerline") %>% arrange(dataset, distance_m)
-  #   DT::datatable(df, selection = "single", options = list(pageLength = 10))
-  # })
-  
-  output$data_table <- renderTable({
+  output$data_table <- DT::renderDataTable({
     df <- analysis_data()
     if (is.null(df)) return()
-    df |> filter(dataset != "Centerline") %>% arrange(dataset, distance_m)
+    
+    df <- df |> filter(dataset != "Centerline")
+      #arrange(dataset, distance_m)
+    
+    excluded <- excluded_rows()
+    if (length(excluded) > 0) {
+      df <- df[-excluded, ]
+    }
+    
+    DT::datatable(
+      df,
+      selection = list(mode = "multiple", selected = NULL, target = 'row'),
+      options = list(pageLength = 10,
+                     searching = FALSE,
+                     lengthChange = FALSE)
+    ) %>% formatRound(columns = c("distance_m","elevation", "value", "distance_from_line"), digits = 1)
   })
+  
   
 }
 
 shinyApp(ui, server)
+
+shinylive::export(appdir = "seismicMap", destdir = "docs")
+
