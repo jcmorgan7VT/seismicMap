@@ -48,7 +48,7 @@ utm_crs <- 26919
 
 ui <- fluidPage(
   h3("Interactive Depth-to-Bedrock Profile Analysis"),
-  p("Click twice on map to define a rectangle.  Rotate with the rotation angle slider. Click Run Analysis to plot cross-section of surface elevation, depth measurements, and proportion of time flowing of sensor locations below map."),
+  p("Click twice on map to define centerline, and adjust the width of the rectangle with slider. Click Run Analysis to plot cross-section of surface elevation, depth measurements, and proportion of time flowing of sensor locations below map."),
   actionButton("reset", "Reset Selection"),
   sliderInput("width", "Rectangle Half-Width (meters):", min = 1, max = 100, value = 10),
   actionButton("run_analysis", "Run Analysis"),
