@@ -9,8 +9,8 @@
 #test
 #install.packages(c("shinylive", "httpuv")) 
 library(pacman)
-p_load(shiny, tidyverse, terra, shinylive, httpuv, tmap, sf, stars, DT) #lwgeom, 
-reactlog::reactlog_enable()
+p_load(shiny, ggplot2, dplyr, terra, tmap, sf, stars, DT, lwgeom)
+#reactlog::reactlog_enable()
 
 #read in data
 looking_good <- rast("pansharpened_terra.tif")
